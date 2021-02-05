@@ -13,27 +13,3 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref S3BucketName
-  LambdaFuction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: com.manthan.LambdaTriggerHandler
-      Runtime: java8
-      CodeUri: target/lambdaTrigger.jar
-      Events:
-        S3Event:
-          Type: S3
-          Properties:
-            Bucket: !Ref SampleS3Bucket
-            Events: s3:ObjectCreated:*
-      Policies:
-        - AWSLambdaBasicExecutionRole
-     
-#add s3 as trigger to lambda         
-  AllowS3ToCallLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: 'lambda:InvokeFunction'
-      FunctionName: !GetAtt LambdaFuction.Arn
-      Principal: 's3.amazonaws.com'
-      SourceAccount: !Sub ${AWS::AccountId}
-      SourceArn: !GetAtt SampleS3Bucket.Arn
