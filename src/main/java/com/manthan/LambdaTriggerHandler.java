@@ -13,6 +13,8 @@ public class LambdaTriggerHandler implements RequestHandler<S3Event, String> {
 		System.out.println("File Path is "+record.getS3().getObject().getKey());
 		System.out.println("Bucket Path is "+record.getS3().getBucket().getArn());
 		System.out.println("Code updated!!!!!");
+				System.out.println("Code updated!!!!!");
+
 		return record.getS3().getBucket().getName();
 	}
 
