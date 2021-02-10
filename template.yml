@@ -25,8 +25,30 @@ Resources:
           Properties:
             Bucket: !Ref SampleS3Bucket
             Events: s3:ObjectCreated:*
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /
+            Method: get
+            RestApiId: !Ref GatewayApi
       Policies:
         - AWSLambdaBasicExecutionRole
+        
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: MySNSTopic
+  
+  GatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      Name: manthan-test123
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+        AllowCredentials: False      
      
 #add s3 as trigger to lambda         
   AllowS3ToCallLambdaPermission:
