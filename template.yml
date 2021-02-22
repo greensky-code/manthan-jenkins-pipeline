@@ -8,17 +8,52 @@ Parameters:
     Description: "S3 bucket to create."
     AllowedPattern: "[a-zA-Z][a-zA-Z0-9_-]*"
     
+  KinesisDeliveryName:
+    Type: String
+    Description: "Kinesis firehose delivery"
+    AllowedPattern: "[a-zA-Z0-9_.-]+"
+    
+  KinesisDeliveryS3Bucket:
+    Type: String
+    Description: "S3 bucket to deliver kinesis stream"
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_-]*"
+    
+  DatabaseInstanceType:
+    Default: db.r4.large
+    Type: String
+    AllowedValues:
+      - db.r4.large
+      - db.r4.xlarge
+      - db.r4.2xlarge
+    
+  CreateVPC:
+    Type: String
+    AllowedPattern: "^(true|false)$"
+    Default: "false"
+    Description: Do you want to create Custom VPC and resource
+    
+Conditions:
+  BuildNetwork: !Equals [ !Ref CreateVPC, "true" ]
+
+
 Resources:
   SampleS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref S3BucketName
+      
+  KinesisDeliveryBucket:
+    Type: AWS::S3::Bucket    
+    Properties:
+      BucketName: !Ref KinesisDeliveryS3Bucket
+      
   LambdaFuction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: com.manthan.LambdaTriggerHandler
       Runtime: java8
       CodeUri: target/lambdaTrigger.jar
+      Role: !GetAtt LambdaExecRole.Arn
       Events:
         S3Event:
           Type: S3
@@ -31,13 +66,22 @@ Resources:
             Path: /
             Method: get
             RestApiId: !Ref GatewayApi
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        
+      #Policies:
+        #- AWSLambdaBasicExecutionRole
+
   SNSTopic:
     Type: AWS::SNS::Topic
     Properties:
       DisplayName: MySNSTopic
+
+  DestinationConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      DestinationConfig:
+          OnSuccess:
+            Destination: !Ref SNSTopic
+      FunctionName: !Ref LambdaFuction
+      Qualifier: $LATEST
   
   GatewayApi:
     Type: AWS::Serverless::Api
@@ -48,8 +92,193 @@ Resources:
         AllowMethods: "'*'"
         AllowHeaders: "'Content-Type'"
         AllowOrigin: "'*'"
-        AllowCredentials: False      
-     
+        AllowCredentials: False
+
+  EventStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DependsOn:
+      - KinesisStreamPolicy
+    Properties:
+      DeliveryStreamName: !Ref KinesisDeliveryName
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt KinesisDeliveryBucket.Arn
+        CompressionFormat: GZIP
+        RoleARN: !GetAtt KinesisStreamRole.Arn
+        
+  KinesisStreamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+
+  KinesisStreamPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref KinesisStreamRole
+      PolicyName: kinesisDeliveryPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'firehose:PutRecord*'
+              - 'firehose:List*'
+              - 'firehose:Describe*'
+            Resource:
+              - !GetAtt KinesisDeliveryBucket.Arn
+
+  KinesisStreamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+              
+  LambdaExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lambda-exec-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  KinesisStreamPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref LambdaExecRole
+      PolicyName: lambdaExecPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:*'
+              - 'apigateway:*'
+              - 'firehose:*'
+            Resource: '*'
+            
+  CustomVPC:
+    Type: AWS::EC2::VPC
+    Condition: BuildNetwork
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: BuildNetwork
+    Properties:
+      VpcId: !Ref CustomVPC
+      CidrBlock: 172.31.1.0/24
+      MapPublicIpOnLaunch: true
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: BuildNetwork
+    Properties:
+      VpcId: !Ref CustomVPC
+      CidrBlock: 172.31.3.0/24
+      MapPublicIpOnLaunch: false
+      
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: BuildNetwork
+    Properties:
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Network
+          Value: PublicRoute
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: BuildNetwork
+    Properties:
+      VpcId: !Ref CustomVPC
+      Tags:
+        - Key: Network
+          Value: PrivateRoute
+          
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Condition: BuildNetwork
+    DependsOn: VPCGatewayAttach
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Condition: BuildNetwork
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref CustomNatGateway
+      
+  VPCGatewayAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: BuildNetwork
+    Properties:
+        VpcId: !Ref CustomVPC
+        InternetGatewayId: !Ref InternetGateway
+        
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: BuildNetwork
+    Properties:
+      Tags:
+        - Key: Network
+          Value: IGateway
+    
+  CustomNatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: BuildNetwork
+    DependsOn: NatEIP
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Condition: BuildNetwork
+    Properties:
+      Domain: vpc     
+
+  PublicRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: BuildNetwork
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  
+  PrivateRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: BuildNetwork
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+      
 #add s3 as trigger to lambda         
   AllowS3ToCallLambdaPermission:
     Type: AWS::Lambda::Permission
