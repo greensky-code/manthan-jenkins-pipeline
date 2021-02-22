@@ -24,7 +24,7 @@ pipeline {
       }
       steps {
           sh "aws cloudformation package --template-file template.yml --s3-bucket $S3_BUCKET --output-template-file template-output.yml"
-		  sh "aws cloudformation deploy --template-file template-output.yml --stack-name $STACK_NAME --parameter-overrides S3BucketName=manthan-bucket1000 KinesisDeliveryName=kinesis-realtime-pipeline KinesisDeliveryS3Bucket=kinesis-delivery-bucket100 CreateVPC=true --capabilities CAPABILITY_IAM"
+		  sh "aws cloudformation deploy --template-file template-output.yml --stack-name $STACK_NAME --parameter-overrides S3BucketName=manthan-bucket1000 KinesisDeliveryName=kinesis-realtime-pipeline KinesisDeliveryS3Bucket=kinesis-delivery-bucket100 CreateVPC=true --capabilities CAPABILITY_NAMED_IAM"
         }
       }
     }
